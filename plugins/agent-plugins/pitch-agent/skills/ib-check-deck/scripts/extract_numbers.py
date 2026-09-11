@@ -68,6 +68,17 @@ def detect_category(context: str, unit: str) -> str:
     """Detect the category of a number based on context and unit."""
     context_lower = context.lower()
 
+    # Unit decides before context keywords: a percentage or a multiple sitting on
+    # a line that mentions revenue is a margin/growth/multiple, not a revenue figure.
+    if unit in ('%', 'bps', 'percent'):
+        if 'margin' in context_lower:
+            return 'ebitda_margin' if 'ebitda' in context_lower else 'margin'
+        if any(t in context_lower for t in ['growth', 'cagr', 'yoy', 'y/y']):
+            return 'growth'
+        return 'percentage'
+    if unit == 'x':
+        return 'multiple'
+
     # Revenue-related
     if any(term in context_lower for term in ['revenue', 'sales', 'top line', 'topline']):
         return 'revenue'
@@ -191,10 +202,11 @@ def find_inconsistencies(numbers: list[NumberInstance]) -> list[dict]:
     by_category = defaultdict(list)
     for num in numbers:
         if num.category != 'other':
-            by_category[num.category].append(num)
+            unit_family = 'USD' if num.unit.startswith('USD') else num.unit
+            by_category[(num.category, unit_family)].append(num)
 
     # Check each category for mismatches
-    for category, instances in by_category.items():
+    for (category, _unit_family), instances in by_category.items():
         if len(instances) < 2:
             continue
 
@@ -206,7 +218,7 @@ def find_inconsistencies(numbers: list[NumberInstance]) -> list[dict]:
                 ref_value = group[0].normalized
                 if ref_value > 0:
                     diff_pct = abs(inst.normalized - ref_value) / ref_value
-                    if diff_pct < 0.05:  # 5% tolerance
+                    if diff_pct < 0.01:  # values meant to be the same figure
                         group.append(inst)
                         placed = True
                         break
